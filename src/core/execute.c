@@ -1247,6 +1247,24 @@ static int apply_memory_deny_write_execute(const ExecContext *c) {
         r = seccomp_rule_add(
                         seccomp,
                         SCMP_ACT_ERRNO(EPERM),
+                        SCMP_SYS(mmap_pgoff),
+                        1,
+                        SCMP_A2(SCMP_CMP_MASKED_EQ, PROT_EXEC|PROT_WRITE, PROT_EXEC|PROT_WRITE));
+        if (r < 0)
+                goto finish;
+
+        r = seccomp_rule_add(
+                        seccomp,
+                        SCMP_ACT_ERRNO(EPERM),
+                        SCMP_SYS(mmap2),
+                        1,
+                        SCMP_A2(SCMP_CMP_MASKED_EQ, PROT_EXEC|PROT_WRITE, PROT_EXEC|PROT_WRITE));
+        if (r < 0)
+                goto finish;
+
+        r = seccomp_rule_add(
+                        seccomp,
+                        SCMP_ACT_ERRNO(EPERM),
                         SCMP_SYS(mprotect),
                         1,
                         SCMP_A2(SCMP_CMP_MASKED_EQ, PROT_EXEC, PROT_EXEC));

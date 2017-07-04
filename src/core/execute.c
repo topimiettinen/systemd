@@ -1449,6 +1449,19 @@ static int apply_restrict_namespaces(Unit *u, const ExecContext *c) {
         return seccomp_restrict_namespaces(c->restrict_namespaces);
 }
 
+static int apply_lock_personality(const Unit* u, const ExecContext *c) {
+        assert(u);
+        assert(c);
+
+        if (!c->lock_personality || c->personality == PERSONALITY_INVALID)
+                return 0;
+
+        if (skip_seccomp_unavailable(u, "LockPersonality="))
+                return 0;
+
+        return seccomp_lock_personality(c->personality);
+}
+
 #endif
 
 static void do_idle_pipe_dance(int idle_pipe[4]) {
@@ -2878,6 +2891,13 @@ static int exec_child(
                         return r;
                 }
 
+                r = apply_lock_personality(unit, context);
+                if (r < 0) {
+                        *exit_status = EXIT_SECCOMP;
+                        *error_message = strdup("Failed to lock personalities");
+                        return r;
+                }
+
                 /* This really should remain the last step before the execve(), to make sure our own code is unaffected
                  * by the filter as little as possible. */
                 r = apply_syscall_filter(unit, context);
@@ -3621,10 +3641,14 @@ void exec_context_dump(ExecContext *c, FILE* f, const char *prefix) {
                         "%sSELinuxContext: %s%s\n",
                         prefix, c->selinux_context_ignore ? "-" : "", c->selinux_context);
 
-        if (c->personality != PERSONALITY_INVALID)
+        if (c->personality != PERSONALITY_INVALID) {
                 fprintf(f,
                         "%sPersonality: %s\n",
                         prefix, strna(personality_to_string(c->personality)));
+                fprintf(f,
+                        "%sLockPersonality: %s\n",
+                        prefix, yes_no(c->lock_personality));
+        }
 
         if (c->syscall_filter) {
 #ifdef HAVE_SECCOMP

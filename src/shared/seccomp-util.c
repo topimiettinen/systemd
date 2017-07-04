@@ -1312,3 +1312,23 @@ int seccomp_restrict_archs(Set *archs) {
 
         return seccomp_load(seccomp);
 }
+
+int seccomp_lock_personality(unsigned long personality) {
+        _cleanup_(seccomp_releasep) scmp_filter_ctx seccomp = NULL;
+        int r;
+
+        seccomp = seccomp_init(SCMP_ACT_ALLOW);
+        if (!seccomp)
+                return -ENOMEM;
+
+        r = seccomp_rule_add_exact(
+                        seccomp,
+                        SCMP_ACT_ERRNO(EPERM),
+                        SCMP_SYS(personality),
+                        1,
+                        SCMP_A0(SCMP_CMP_NE, personality));
+        if (r < 0)
+                return r;
+
+        return seccomp_load(seccomp);
+}

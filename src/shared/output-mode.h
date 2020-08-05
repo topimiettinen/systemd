@@ -20,6 +20,7 @@ typedef enum OutputMode {
         OUTPUT_JSON_SEQ,
         OUTPUT_CAT,
         OUTPUT_WITH_UNIT,
+        OUTPUT_AUDIT,
         _OUTPUT_MODE_MAX,
         _OUTPUT_MODE_INVALID = -1
 } OutputMode;

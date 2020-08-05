@@ -383,6 +383,10 @@ static int output_timestamp_realtime(FILE *f, sd_journal *j, OutputMode mode, Ou
                         xsprintf(buf, "%10"PRI_TIME".%06"PRIu64, t, x % USEC_PER_SEC);
                         break;
 
+                case OUTPUT_AUDIT:
+                        xsprintf(buf, "%10"PRI_TIME".%03"PRIu64, t, (x % USEC_PER_SEC) / 1000);
+                        break;
+
                 case OUTPUT_SHORT_ISO:
                         if (strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S%z", gettime_r(&t, &tm)) <= 0)
                                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
@@ -1199,6 +1203,92 @@ static int output_cat(
         return 0;
 }
 
+static int output_audit(
+                FILE *f,
+                sd_journal *j,
+                OutputMode mode,
+                unsigned n_columns,
+                OutputFlags flags,
+                const Set *output_fields,
+                const size_t highlight[2]) {
+
+        int r;
+        const void *data;
+        size_t length, n = 0;
+        _cleanup_free_ char *uid = NULL, *auid = NULL, *message = NULL, *realtime = NULL, *audit_type_name = NULL, *audit_id = NULL;
+        char *msg;
+        size_t uid_len = 0, auid_len = 0, message_len = 0, realtime_len = 0, audit_type_name_len = 0, audit_id_len = 0;
+        const ParseFieldVec fields[] = {
+                PARSE_FIELD_VEC_ENTRY("MESSAGE=", &message, &message_len),
+                PARSE_FIELD_VEC_ENTRY("_AUDIT_ID=", &audit_id, &audit_id_len),
+                PARSE_FIELD_VEC_ENTRY("_AUDIT_LOGINUID=", &auid, &auid_len),
+                PARSE_FIELD_VEC_ENTRY("_AUDIT_TYPE_NAME=", &audit_type_name, &audit_type_name_len),
+                PARSE_FIELD_VEC_ENTRY("_SOURCE_REALTIME_TIMESTAMP=", &realtime, &realtime_len),
+                PARSE_FIELD_VEC_ENTRY("_UID=", &uid, &uid_len),
+        };
+
+        assert(f);
+        assert(j);
+
+        flags |= OUTPUT_SHOW_ALL;
+
+        sd_journal_set_data_threshold(j, 0);
+
+        JOURNAL_FOREACH_DATA_RETVAL(j, data, length, r) {
+                r = parse_fieldv(data, length, fields, ELEMENTSOF(fields));
+                if (r < 0)
+                        return r;
+        }
+        if (r == -EBADMSG) {
+                log_debug_errno(r, "Skipping message we can't read: %m");
+                return 0;
+        }
+        if (r < 0)
+                return log_error_errno(r, "Failed to get journal fields: %m");
+
+        if (!message) {
+                log_debug("Skipping message without MESSAGE= field.");
+                return 0;
+        }
+
+        fprintf(f, "type=%.*s msg=audit(", (int) audit_type_name_len, audit_type_name);
+        n += 5 + audit_type_name_len + 11;
+
+        r = output_timestamp_realtime(f, j, mode, flags, realtime);
+        if (r < 0)
+                return r;
+        n += r;
+
+        if (audit_id) {
+                fprintf(f, ":%.*s):", (int) audit_id_len, audit_id);
+                n += 1 + audit_id_len + 2;
+        }
+
+        if (strncmp(message, audit_type_name, audit_type_name_len) == 0) {
+                /* Skip audit type name at start of message */
+                msg = message + audit_type_name_len;
+                message_len -= audit_type_name_len;
+        } else
+                msg = message;
+
+        fprintf(f, "%.*s", (int) message_len, msg);
+        n += message_len;
+
+        if (uid) {
+                fprintf(f, " UID=%.*s ", (int) uid_len, uid);
+                n += 4 + uid_len;
+        }
+
+        if (auid) {
+                fprintf(f, " AUID=%.*s", (int) auid_len, auid);
+                n += 6 + auid_len;
+        }
+        fprintf(f, "\n");
+        n += 2;
+
+        return n;
+}
+
 static int (*output_funcs[_OUTPUT_MODE_MAX])(
                 FILE *f,
                 sd_journal *j,
@@ -1223,6 +1313,7 @@ static int (*output_funcs[_OUTPUT_MODE_MAX])(
         [OUTPUT_JSON_SEQ]          = output_json,
         [OUTPUT_CAT]               = output_cat,
         [OUTPUT_WITH_UNIT]         = output_short,
+        [OUTPUT_AUDIT]             = output_audit
 };
 
 int show_journal_entry(
